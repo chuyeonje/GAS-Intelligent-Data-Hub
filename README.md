@@ -5,6 +5,7 @@ https://docs.google.com/spreadsheets/d/1Emh7n5RNDgkIDQtlHE186rtQdcoJn8GydOaOuVVv
 
 폴더 구조를 다음과 같이 해주세요
 
+```
 Google-Drive-Root/
  └── 시트폴더/
       ├── MUSIC/         # 오디오 청크 데이터 저장소
@@ -12,7 +13,7 @@ Google-Drive-Root/
       ├── AI/            # 에이전트 작업 로그 및 설정
       ├── ORC/           # 이미지/텍스트 처리 폴더
       └── [사본] 통합 제어 시스템.gsheet
-
+```
 # Google Sheets & GAS 통합 제어 프레임워크 (Master-Table System)
 
 본 프로젝트는 구글 스프레드시트를 단순한 데이터 저장소가 아닌, '관리 테이블(Master Table)'을 기반으로 작동하는 중앙 제어형 자동화 프레임워크로 활용합니다. 데이터 무결성 검증, 인메모리(In-memory) 기반 SQL 처리, 그리고 검색 기반 액션 에이전트를 결합하여 확장성 높은 업무 환경을 제공합니다.
