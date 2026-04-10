@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>STT 컨트롤러</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        body { margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; background-color: #f0f0f0; font-family: 'Roboto', sans-serif; }
+        .controller-container {
+            width: 240px; background-color: #ffffff; border-radius: 12px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.15); display: flex;
+            flex-direction: column; align-items: center; padding: 20px 10px;
+            box-sizing: border-box;
+        }
+        #result-display {
+            width: 90%; height: 80px; margin-bottom: 8px; border: 1px solid #e0e0e0;
+            border-radius: 4px; padding: 8px; font-size: 13px; resize: none;
+            background-color: #fafafa; color: #333; line-height: 1.4;
+        }
+
+        /* 10초 침묵 감지 타이머 바 */
+        #timer-bar {
+            width: 90%; height: 4px; background-color: #e0e0e0;
+            margin-bottom: 12px; border-radius: 2px; overflow: hidden;
+            display: none;
+        }
+        #timer-progress {
+            width: 100%; height: 100%; background-color: #F44336;
+            transition: width 1s linear;
+        }
+
+        .md-btn {
+            width: 90%; height: 45px; border: none; border-radius: 4px;
+            font-size: 14px; font-weight: 500; cursor: pointer;
+            transition: all 0.2s; color: white; margin: 5px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        #record-btn { background-color: #2196F3; }
+        #record-btn.recording { background-color: #F44336; animation: pulse 1.5s infinite; }
+        #stop-btn { background-color: #757575; }
+        #apply-btn { background-color: #4CAF50; }
+        .md-btn:disabled { background-color: #e0e0e0; color: #9e9e9e; cursor: not-allowed; box-shadow: none; }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="controller-container">
+    <textarea id="result-display" placeholder="마이크를 켜고 말씀하세요..."></textarea>
+
+    <div id="timer-bar"><div id="timer-progress"></div></div>
+
+    <button id="record-btn" class="md-btn">마이크 켜기</button>
+    <button id="stop-btn" class="md-btn" disabled>일시정지 (타이머 정지)</button>
+    <button id="apply-btn" class="md-btn" disabled>시트에 적용</button>
+</div>
+
+<script>
+    const RUN_MODE = "<?= mode ?>";
+
+    const STTManager = {
+        recognition: null,
+        isRecording: false,
+        isExplicitlyPaused: false, // [핵심] 사용자가 의도적으로 일시정지를 눌렀는지 추적
+        finalTextBuffer: "",
+        autoClearTimer: null,
+        remainingSeconds: 10, // 10초 대기 시간
+
+        els: {
+            recordBtn: document.getElementById('record-btn'),
+            stopBtn: document.getElementById('stop-btn'),
+            applyBtn: document.getElementById('apply-btn'),
+            display: document.getElementById('result-display'),
+            timerBar: document.getElementById('timer-bar'),
+            timerProgress: document.getElementById('timer-progress')
+        },
+
+        init: function() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) return alert("브라우저 미지원");
+
+            this.recognition = new SpeechRecognition();
+            this.recognition.continuous = true;
+            this.recognition.interimResults = true;
+            this.recognition.lang = 'ko-KR';
+
+            this.bindEvents();
+        },
+
+        bindEvents: function() {
+            this.recognition.onresult = (event) => this.handleResult(event);
+            this.recognition.onerror = (event) => this.handleError(event);
+            this.recognition.onend = () => this.syncStateToStopped();
+
+            this.els.recordBtn.addEventListener('click', () => this.startRecording());
+            this.els.stopBtn.addEventListener('click', () => this.stopRecording());
+            this.els.applyBtn.addEventListener('click', () => this.applyToSheet());
+        },
+
+        handleResult: function(event) {
+            // [수정] 말을 감지할 때마다 10초 타이머 초기화 (생명 연장)
+            this.startSilenceTimer();
+
+            let interimTranscript = '';
+            for (let i = event.resultIndex; i < event.results.length; ++i) {
+                if (event.results[i].isFinal) {
+                    this.finalTextBuffer += event.results[i][0].transcript + " ";
+                } else {
+                    interimTranscript += event.results[i][0].transcript;
+                }
+            }
+            this.els.display.value = this.finalTextBuffer + interimTranscript;
+            this.els.applyBtn.disabled = false;
+        },
+
+        startRecording: function() {
+            this.isExplicitlyPaused = false; // 일시정지 상태 해제
+            this.startSilenceTimer();        // 마이크 켜는 즉시 10초 카운트 시작
+
+            if (this.isRecording) return;
+            try {
+                this.recognition.start();
+                this.isRecording = true;
+                this.updateUI(true);
+            } catch (e) {
+                this.syncStateToStopped();
+            }
+        },
+
+        stopRecording: function() {
+            // [기획 핵심 로직] '일시정지' 버튼 클릭 시
+            this.isExplicitlyPaused = true; // 사용자의 명시적 대기 의사 확인
+            this.stopSilenceTimer();        // 10초 리셋 타이머 완벽히 삭제 (무한 보존)
+
+            if (!this.isRecording) return;
+            try { this.recognition.stop(); } catch(e) {}
+        },
+
+        syncStateToStopped: function() {
+            this.isRecording = false;
+            this.updateUI(false);
+            // 주의: 브라우저가 침묵을 감지해 강제로 마이크를 껐더라도,
+            // 일시정지를 누르지 않았다면(isExplicitlyPaused == false) 10초 타이머는 계속 흘러갑니다.
+        },
+
+        // --- 10초 침묵 감지 자동 삭제 로직 ---
+        startSilenceTimer: function() {
+            this.stopSilenceTimer(); // 기존 타이머 취소
+            if (this.isExplicitlyPaused) return; // 일시정지 상태면 타이머 작동 금지
+
+            this.remainingSeconds = 10;
+            this.els.timerBar.style.display = 'block';
+            this.els.timerProgress.style.width = '100%';
+
+            this.autoClearTimer = setInterval(() => {
+                this.remainingSeconds--;
+                this.els.timerProgress.style.width = (this.remainingSeconds / 10 * 100) + '%';
+
+                if (this.remainingSeconds <= 0) {
+                    this.executeAutoClear();
+                }
+            }, 1000);
+        },
+
+        stopSilenceTimer: function() {
+            if (this.autoClearTimer) clearInterval(this.autoClearTimer);
+            this.els.timerBar.style.display = 'none';
+            this.els.timerProgress.style.width = '100%';
+        },
+
+        executeAutoClear: function() {
+            this.stopSilenceTimer();
+            this.finalTextBuffer = "";
+            this.els.display.value = "";
+            this.els.display.placeholder = "10초 이상 침묵하여 초기화되었습니다.";
+
+            // 마이크도 강제 종료
+            this.isExplicitlyPaused = true;
+            if (this.isRecording) {
+                try { this.recognition.stop(); } catch(e) {}
+            }
+
+            this.updateUI(false);
+            setTimeout(() => { this.els.display.placeholder = "마이크를 켜고 말씀하세요..."; }, 3000);
+        },
+        // ---------------------------
+
+        updateUI: function(isRecording) {
+            const hasText = this.els.display.value.trim().length > 0;
+            if (isRecording) {
+                this.els.recordBtn.innerText = '녹음 중...';
+                this.els.recordBtn.classList.add('recording');
+                this.els.recordBtn.disabled = true;
+                this.els.stopBtn.disabled = false;
+                this.els.applyBtn.disabled = true;
+            } else {
+                this.els.recordBtn.innerText = hasText ? '이어 말하기' : '마이크 켜기';
+                this.els.recordBtn.classList.remove('recording');
+                this.els.recordBtn.disabled = false;
+                this.els.stopBtn.disabled = true;
+                this.els.applyBtn.disabled = !hasText;
+            }
+        },
+
+        applyToSheet: function() {
+            const text = this.els.display.value.trim();
+            if (!text) return;
+
+            this.isExplicitlyPaused = true; // 전송 중 리셋 방지
+            this.stopSilenceTimer();
+
+            this.els.recordBtn.disabled = true;
+            this.els.applyBtn.disabled = true;
+            this.els.applyBtn.innerText = "적용 중...";
+
+            google.script.run
+                .withSuccessHandler((response) => {
+                    if(response && response.success) {
+                        this.finalTextBuffer = '';
+                        this.els.display.value = '';
+                        this.updateUI(false);
+                    } else {
+                        alert("에러: " + response.error);
+                        this.isExplicitlyPaused = false;
+                        this.startSilenceTimer(); // 실패 시 10초 기회 다시 줌
+                    }
+                })
+                .withFailureHandler((err) => {
+                    alert("실패: " + err.message);
+                    this.isExplicitlyPaused = false;
+                    this.startSilenceTimer();
+                })
+                .appendVoiceData(text, RUN_MODE);
+
+            setTimeout(() => {
+                this.els.applyBtn.innerText = "시트에 적용";
+                this.updateUI(this.isRecording);
+            }, 1000);
+        },
+
+        handleError: function(e) { this.stopRecording(); }
+    };
+
+    window.onload = () => STTManager.init();
+</script>
+</body>
+</html>

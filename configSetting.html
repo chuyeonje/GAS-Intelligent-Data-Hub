@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configuration Settings</title>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #4285f4;
+            --primary-hover: #357ae8;
+            --bg-color: #f8f9fa;
+            --card-bg: #ffffff;
+            --text-color: #333333;
+            --border-color: #dadce0;
+        }
+
+        body {
+            font-family: 'Noto Sans KR', sans-serif;
+            background-color: var(--bg-color);
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            color: var(--text-color);
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .container {
+            background-color: var(--card-bg);
+            padding: 32px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            width: 100%;
+            max-width: 440px;
+        }
+
+        h2 {
+            margin-top: 0;
+            margin-bottom: 24px;
+            font-size: 22px;
+            text-align: center;
+            color: #1a73e8;
+            letter-spacing: -0.5px;
+        }
+
+        .input-group { margin-bottom: 16px; }
+
+        label {
+            display: block;
+            font-weight: 700;
+            margin-bottom: 6px;
+            font-size: 13px;
+            color: #5f6368;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            box-sizing: border-box;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 2px rgba(66, 133, 244, 0.15);
+        }
+
+        button {
+            width: 100%;
+            padding: 14px;
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+            margin-top: 10px;
+        }
+
+        button:hover { background-color: var(--primary-hover); }
+        button:active { transform: scale(0.98); }
+
+        #status {
+            margin-top: 16px;
+            font-size: 13px;
+            text-align: center;
+            min-height: 20px;
+            font-weight: 500;
+        }
+
+        .status-success { color: #1e8e3e; }
+        .status-error { color: #d93025; }
+        .status-pending { color: #5f6368; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h2>환경 설정</h2>
+
+    <div class="input-group">
+        <label for="geminiKey">GEMINI_API_KEY</label>
+        <input type="password" id="geminiKey" placeholder="Gemini API 키를 입력하세요">
+    </div>
+
+    <div class="input-group">
+        <label for="slackUrl">SLACK_WEBHOOK_URL</label>
+        <input type="text" id="slackUrl" placeholder="https://hooks.slack.com/services/...">
+    </div>
+
+    <div class="input-group">
+        <label for="folderId">FOLDER_ID</label>
+        <input type="text" id="folderId" placeholder="Google Drive 폴더 ID를 입력하세요">
+    </div>
+
+    <button onclick="submitForm()">설정 저장하기</button>
+    <div id="status"></div>
+</div>
+
+<script>
+    // GAS Mock (로컬 테스트용)
+    if (typeof google === 'undefined') {
+        window.google = {
+            script: {
+                run: {
+                    withSuccessHandler: function(callback) {
+                        this._callback = callback;
+                        return this;
+                    },
+                    saveKeys: function(data) {
+                        console.log("Saving:", data);
+                        setTimeout(() => { if (this._callback) this._callback("성공적으로 저장되었습니다!"); }, 800);
+                    }
+                },
+                host: { close: () => console.log("UI 닫기") }
+            }
+        };
+    }
+
+    function submitForm() {
+        const geminiKey = document.getElementById('geminiKey').value.trim();
+        const slackUrl = document.getElementById('slackUrl').value.trim();
+        const folderId = document.getElementById('folderId').value.trim();
+        const statusDiv = document.getElementById('status');
+
+        if (geminiKey || slackUrl || folderId) {
+            const data = {
+                geminiKey: geminiKey ? geminiKey:null,
+                slackUrl: slackUrl ? slackUrl : null,
+                folderId: folderId ? folderId : null
+            };
+
+            statusDiv.innerText = "저장 중...";
+            statusDiv.className = "status-pending";
+
+            google.script.run
+                .withSuccessHandler((msg) => {
+                    statusDiv.innerText = msg;
+                    statusDiv.className = "status-success";
+                    setTimeout(() => {
+                        if (google.script.host && typeof google.script.host.close === 'function') {
+                            google.script.host.close();
+                        }
+                    }, 1500);
+                })
+                .saveKeys(data);
+        }else{
+            statusDiv.innerText = "1개 이상 항목을 입력해주세요.";
+            statusDiv.className = "status-error";
+            return;
+        }
+    }
+</script>
+</body>
+</html>

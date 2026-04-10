@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <base target="_top">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #4285f4;
+            --border-hover: #1a73e8;
+            --bg-color: #f8f9fa;
+        }
+        body { font-family: 'Noto Sans KR', sans-serif; padding: 20px; background-color: var(--bg-color); margin: 0; }
+        .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); max-width: 460px; margin: auto; }
+        h3 { margin-top: 0; color: #1a73e8; text-align: center; font-size: 20px; }
+
+        /* 드래그 앤 드롭 영역 스타일 */
+        .drop-zone {
+            border: 2px dashed #dadce0;
+            padding: 40px 20px;
+            text-align: center;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            transition: all 0.3s ease;
+            background-color: #fafafa;
+            cursor: pointer;
+            position: relative;
+        }
+        .drop-zone.drag-over {
+            border-color: var(--border-hover);
+            background-color: #e8f0fe;
+            transform: scale(1.02);
+        }
+        .drop-zone p { margin: 0; color: #5f6368; font-size: 14px; }
+        .drop-zone .icon { font-size: 40px; margin-bottom: 10px; display: block; }
+
+        input[type="file"] { display: none; }
+
+        button {
+            width: 100%; padding: 14px; background-color: var(--primary-color);
+            color: white; border: none; border-radius: 8px; font-weight: bold;
+            font-size: 16px; cursor: pointer; transition: background 0.2s;
+        }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+
+        #loader { display: none; text-align: center; margin: 15px 0; color: #666; font-size: 14px; font-weight: 500; }
+        #resultArea { margin-top: 20px; display: none; animation: fadeIn 0.5s; }
+        textarea { width: 100%; height: 160px; padding: 12px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-size: 13px; line-height: 1.5; background: #fffcf0; resize: none; }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h3>OCR 텍스트 추출기</h3>
+
+    <form id="uploadForm">
+        <div class="drop-zone" id="dropZone">
+            <span class="icon">📁</span>
+            <p id="dropText">여기에 파일을 끌어다 놓거나 클릭하세요</p>
+            <input type="file" name="myFile" id="fileInput" accept="image/*,.pdf">
+        </div>
+
+        <button type="button" id="submitBtn" onclick="runOCR()">텍스트 추출 시작</button>
+    </form>
+
+    <div id="loader">⚙️ AI가 이미지를 분석하고 있습니다...</div>
+
+    <div id="resultArea">
+        <label style="font-size: 12px; font-weight: bold; color: #1e8e3e;">✓ 시트에 기록 완료!</label>
+        <textarea id="outputText" readonly></textarea>
+    </div>
+</div>
+
+<script>
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const dropText = document.getElementById('dropText');
+
+    // 1. 클릭 시 파일 선택창 열기
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    // 2. 파일 선택 시 이름 표시
+    fileInput.addEventListener('change', () => {
+        if (fileInput.files.length > 0) {
+            dropText.innerText = `선택됨: ${fileInput.files[0].name}`;
+            dropZone.style.borderColor = '#1a73e8';
+        }
+    });
+
+    // 3. 드래그 앤 드롭 이벤트 처리
+    ['dragover', 'dragleave', 'drop'].forEach(eventName => {
+        dropZone.addEventListener(eventName, e => {
+            e.preventDefault();
+            e.stopPropagation();
+        }, false);
+    });
+
+    dropZone.addEventListener('dragover', () => dropZone.classList.add('drag-over'));
+    dropZone.addEventListener('dragleave', () => dropZone.classList.add('drag-over'));
+
+    dropZone.addEventListener('drop', (e) => {
+        dropZone.classList.remove('drag-over');
+        const files = e.dataTransfer.files;
+        if (files.length > 0) {
+            fileInput.files = files; // 선택된 파일을 input에 주입
+            dropText.innerText = `업로드 대기: ${files[0].name}`;
+        }
+    });
+
+    // 4. OCR 실행 함수
+    function runOCR() {
+        if (!fileInput.files[0]) {
+            alert("파일을 먼저 선택하거나 드래그해 주세요.");
+            return;
+        }
+
+        const btn = document.getElementById('submitBtn');
+        const loader = document.getElementById('loader');
+        const resultArea = document.getElementById('resultArea');
+
+        btn.disabled = true;
+        loader.style.display = 'block';
+        resultArea.style.display = 'none';
+
+        // 폼 데이터를 GAS로 전달
+        google.script.run
+            .withSuccessHandler(function(response) {
+                loader.style.display = 'none';
+                btn.disabled = false;
+
+                if (response.status === "success") {
+                    resultArea.style.display = 'block';
+                    document.getElementById('outputText').value = response.data;
+                    dropText.innerText = "파일 전송 완료!";
+                } else {
+                    alert("에러: " + response.message);
+                }
+            })
+            .withFailureHandler(function(err) {
+                loader.style.display = 'none';
+                btn.disabled = false;
+                alert("시스템 오류: " + err);
+            })
+            .processFileUpload(document.getElementById('uploadForm'));
+    }
+</script>
+</body>
+</html>

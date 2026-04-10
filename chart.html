@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic AI Chart Dashboard</title>
+    <!-- Tailwind CSS for Responsive Layout -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js for Visualization -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            background-color: #f8fafc;
+            margin: 0;
+            padding: 10px;
+            overflow: hidden; /* GAS 환경에서 크기 조절을 위해 스크롤 억제 */
+        }
+        .chart-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100%;
+            min-height: 250px;
+        }
+        canvas {
+            max-width: 100% !important;
+            max-height: 100% !important;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col">
+
+<!-- 차트가 렌더링될 메인 컨테이너 -->
+<div id="dashboard" class="grid gap-4 w-full h-full">
+    <!-- JS에 의해 동적으로 생성됨 -->
+</div>
+
+<script>
+    /**
+     * 입력 데이터 예시 구조:
+     * {
+     * "매출 현황": [{"1월": 100, "2월": 150, "3월": 120}, "bar"],
+     * "비용 구조": [{"인건비": 50, "임대료": 30, "기타": 20}, "pie"],
+     * "성장률": [{"2023": 10, "2024": 25}, "line"]
+     * }
+     */
+
+    function renderDashboard(data) {
+        const container = document.getElementById('dashboard');
+        container.innerHTML = ''; // 초기화
+
+        const chartNames = Object.keys(data);
+        const count = chartNames.length;
+
+        // 1. 레이아웃 클래스 설정
+        if (count === 1) {
+            container.className = "grid grid-cols-1 h-full w-full";
+        } else if (count === 2) {
+            container.className = "grid grid-cols-2 h-full w-full";
+        } else if (count === 3) {
+            container.className = "grid grid-cols-2 h-full w-full";
+            // 3개일 때 [ㅗ] 형태: 첫 2개는 각 1열, 마지막 1개는 2열 차지
+        }
+
+        // 2. 차트 생성 루프
+        chartNames.forEach((name, index) => {
+            const chartDataObj = data[name][0]; // {변수:값}
+            const chartType = data[name][1];    // "bar", "pie" 등
+
+            // 카드 엘리먼트 생성
+            const card = document.createElement('div');
+            card.className = "chart-card";
+
+            // 3개일 때 마지막 요소만 가로 전체 차지 ( [ㅗ] 형태 구현 )
+            if (count === 3 && index === 2) {
+                card.classList.add('col-span-2');
+            }
+
+            const title = document.createElement('h3');
+            title.innerText = name;
+            title.className = "text-lg font-bold mb-2 text-gray-700";
+
+            const canvasWrapper = document.createElement('div');
+            canvasWrapper.className = "relative flex-grow w-full";
+
+            const canvas = document.createElement('canvas');
+            canvas.id = `chart-${index}`;
+
+            canvasWrapper.appendChild(canvas);
+            card.appendChild(title);
+            card.appendChild(canvasWrapper);
+            container.appendChild(card);
+
+            // 3. Chart.js 렌더링
+            const labels = Object.keys(chartDataObj).slice(0, 5); // 최대 5개 변수 제한
+            const values = labels.map(label => chartDataObj[label]);
+
+            new Chart(canvas, {
+                type: chartType,
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: name,
+                        data: values,
+                        backgroundColor: [
+                            'rgba(54, 162, 235, 0.7)',
+                            'rgba(255, 99, 132, 0.7)',
+                            'rgba(75, 192, 192, 0.7)',
+                            'rgba(255, 206, 86, 0.7)',
+                            'rgba(153, 102, 255, 0.7)'
+                        ],
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: chartType === 'pie' || chartType === 'doughnut' ? 'right' : 'top',
+                        }
+                    }
+                }
+            });
+        });
+    }
+
+    // GAS에서 호출하거나 테스트용으로 데이터를 로드하는 함수
+    window.onload = function() {
+        // 테스트용 데이터 (실제 운영시에는 google.script.run 등을 통해 GAS에서 받아옴)
+        const sampleData = {
+            "주간 매출": [{"월": 12, "화": 19, "수": 3, "목": 5, "금": 2}, "bar"],
+            "카테고리 비율": [{"전자기기": 40, "의류": 30, "식품": 20, "도서": 10}, "pie"],
+            "방문자 추이": [{"10일": 50, "11일": 70, "12일": 60, "13일": 90, "14일": 85}, "line"]
+        };
+
+        // 데이터가 1개, 2개, 3개일 때를 각각 테스트해보실 수 있습니다.
+        renderDashboard(sampleData);
+    };
+
+    // GAS의 google.script.run으로 실시간 데이터를 받을 수 있도록 리스너 등록 가능
+    function updateFromGas(jsonData) {
+        const data = JSON.parse(jsonData);
+        renderDashboard(data);
+    }
+</script>
+</body>
+</html>

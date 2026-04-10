@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <script src="https://cdn.jsdelivr.net/npm/alasql@4"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>텍스트 컨트롤러</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        body { margin: 0; display: flex; justify-content: center; align-items: center; min-height: 100vh; background-color: #f0f0f0; font-family: 'Roboto', sans-serif; }
+        .controller-container {
+            /* 버튼이 3개로 늘어났으므로 너비를 260px에서 300px로 살짝 조정했습니다 */
+            width: 300px; background-color: #ffffff; border-radius: 12px;
+            box-shadow: 0 8px 16px rgba(0,0,0,0.15); display: flex;
+            flex-direction: column; align-items: center; padding: 20px;
+            box-sizing: border-box;
+        }
+
+        /* 모드 선택 스위치 스타일 */
+        .mode-selector {
+            display: flex; width: 100%; background: #eee; border-radius: 8px;
+            padding: 4px; margin-bottom: 15px; box-sizing: border-box;
+        }
+        .mode-btn {
+            flex: 1; border: none; background: none; padding: 8px 0;
+            font-size: 12px; font-weight: 500; cursor: pointer;
+            border-radius: 6px; transition: all 0.2s; color: #777;
+        }
+        .mode-btn.active { background: #fff; color: #2196F3; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+
+        #text-input {
+            width: 100%; height: 120px; margin-bottom: 15px; border: 1px solid #e0e0e0;
+            border-radius: 6px; padding: 12px; font-size: 14px; resize: none;
+            background-color: #fafafa; color: #333; line-height: 1.5;
+            box-sizing: border-box; outline: none; transition: border-color 0.2s;
+        }
+        #text-input:focus { border-color: #2196F3; }
+
+        .md-btn {
+            width: 100%; height: 45px; border: none; border-radius: 4px;
+            font-size: 14px; font-weight: 500; cursor: pointer;
+            transition: all 0.2s; color: white; margin: 5px 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        #apply-btn { background-color: #4CAF50; }
+        #apply-btn:hover { background-color: #43a047; }
+        #clear-btn { background-color: #757575; }
+
+        .md-btn:disabled { background-color: #e0e0e0; color: #9e9e9e; cursor: not-allowed; box-shadow: none; }
+
+        .loading { position: relative; color: transparent !important; }
+        .loading::after {
+            content: ""; position: absolute; width: 16px; height: 16px;
+            top: 50%; left: 50%; margin: -8px 0 0 -8px;
+            border: 2px solid rgba(255,255,255,0.3); border-radius: 50%;
+            border-top-color: #fff; animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<div class="controller-container">
+    <div class="mode-selector">
+        <button class="mode-btn active" data-mode="MEMO">단순 기록</button>
+        <button class="mode-btn" data-mode="AI_TASK">AI 분석</button>
+        <button class="mode-btn" data-mode="SQL_QUERY">SQL 작성</button>
+    </div>
+
+    <textarea id="text-input" placeholder="내용을 입력하세요..."></textarea>
+
+    <button id="apply-btn" class="md-btn" disabled>적용</button>
+    <button id="clear-btn" class="md-btn">내용 지우기</button>
+</div>
+<script>
+    const RUN_ENV = "<?= mode ?>"; // GAS 실행 환경 구분용
+
+    const InputManager = {
+        dbData: [],
+
+        currentMode: "MEMO", // 기본 모드 설정
+        chk : "N",
+
+        els: {
+            input: document.getElementById('text-input'),
+            applyBtn: document.getElementById('apply-btn'),
+            clearBtn: document.getElementById('clear-btn'),
+            modeBtns: document.querySelectorAll('.mode-btn')
+        },
+
+        init: function() {
+            this.bindEvents();
+            this.loadExternalLibrary(); // 1. 라이브러리 로드 확인
+            this.syncDatabase();        // 2. GAS로부터 데이터 동기화
+        },
+
+        // GAS에서 데이터를 가져와 AlaSQL에 밀어넣는 핵심 로직
+        syncDatabase: function() {
+            if (typeof alasql === 'undefined') {
+                console.error("AlaSQL 라이브러리가 로드되지 않았습니다. 1초 후 다시 시도합니다.");
+                setTimeout(() => this.syncDatabase(), 1000);
+                return;
+            }
+            console.log("데이터 동기화 시작...");
+            google.script.run
+                .withSuccessHandler((data) => {
+                    if (!data) return;
+                    this.dbData = data;
+                    const tableGroups = {};
+                    data.forEach(row => {
+                        // row[0]이 문자열이고 형식이 맞는지 체크
+                        if (row && row[0] && typeof row[0] === 'string' && row[0].includes('/')) {
+                            const parts = row[0].split('/');
+                            const tableName = parts[0].trim();
+                            const isMarker = parts[1] === 'EMPTY_MARKER';
+
+                            if (!tableGroups[tableName]) tableGroups[tableName] = [];
+
+                            // 마커가 아닌 실제 데이터일 때만 그룹에 추가
+                            if (!isMarker) {
+                                tableGroups[tableName].push(row);
+                            }
+                        }
+                    });
+
+                    Object.keys(tableGroups).forEach(name => {
+                        try {
+                            // 기존 테이블 삭제 후 재생성 (구조 동기화)
+                            alasql(`DROP TABLE IF EXISTS \`${name}\``);
+                            alasql(`CREATE TABLE \`${name}\``);
+
+                            if (tableGroups[name].length > 0) {
+                                // [수정 핵심] 2D 배열을 명시적인 객체 배열로 변환 (컬럼명을 '0', '1', '2'... 로 강제 고정)
+                                const formattedData = tableGroups[name].map(row => {
+                                    const obj = {};
+                                    row.forEach((val, idx) => { obj[idx.toString()] = val; });
+                                    return obj;
+                                });
+                                alasql(`SELECT * INTO \`${name}\` FROM ?`, [formattedData]);
+                            }
+                        } catch (err) {
+                            console.error(`AlaSQL 처리 에러 [${name}]:`, err.message);
+                        }
+                    });
+
+                    console.log("동기화 완료. 생성된 테이블 목록:", Object.keys(tableGroups).join(", "));
+                    this.chk = "Y"
+                })
+                .fetchDatabaseData();
+        },
+
+        loadExternalLibrary: function() {
+            // AlaSQL 라이브러리 로드 여부 체크 (CDN 연결 확인용)
+            if (typeof alasql === 'undefined') {
+                console.error("AlaSQL 라이브러리를 불러오지 못했습니다. CDN 설정을 확인하세요.");
+            }
+        },
+
+        // 모드별 Placeholder 텍스트 반환 헬퍼 함수
+        getPlaceholderText: function(mode) {
+            if (mode === "AI_TASK") return "AI가 분석할 명령을 입력하세요...";
+            if (mode === "SQL_QUERY") return "SELECT * FROM 데이터 WHERE... (SQL 입력)";
+            return "내용을 입력하세요...";
+        },
+
+        bindEvents: function() {
+            if (this.chk ==="N") {
+                setTimeout(() => this.bindEvents(), 1000);
+                return;
+            }
+            // 모드 변경 이벤트
+            this.els.modeBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    this.els.modeBtns.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    this.currentMode = btn.dataset.mode;
+
+                    // 모드별 가이드 텍스트 변경
+                    this.els.input.placeholder = this.getPlaceholderText(this.currentMode);
+                });
+            });
+
+            this.els.input.addEventListener('input', () => {
+                this.els.applyBtn.disabled = this.els.input.value.trim().length === 0;
+            });
+
+            this.els.applyBtn.addEventListener('click', () => this.sendData());
+            this.els.clearBtn.addEventListener('click', () => this.clearInput());
+
+            this.els.input.addEventListener('keydown', (e) => {
+                if (e.ctrlKey && e.key === 'Enter' && !this.els.applyBtn.disabled) {
+                    this.sendData();
+                }
+            });
+        },
+
+        clearInput: function() {
+            if (this.els.input.value && !confirm("내용을 모두 지울까요?")) return;
+            this.els.input.value = "";
+            this.els.applyBtn.disabled = true;
+            this.els.input.focus();
+        },
+
+        sendData: async function() {
+            const text = this.els.input.value.trim();
+            if (!text) return;
+
+            this.setLoading(true);
+
+            if (this.currentMode === "SQL_QUERY") {
+                try {
+                    const sqlText = text.toUpperCase();
+                    let action = "UNKNOWN";
+                    let targetSheet = null;
+
+                    if (sqlText.startsWith("SELECT")) {
+                        action = "SELECT";
+                    } else if (sqlText.startsWith("UPDATE")) {
+                        action = "UPDATE";
+                        targetSheet = text.match(/UPDATE\s+[`]?([^`\s]+)[`]?/i)?.[1];
+                    } else if (sqlText.startsWith("DELETE")) {
+                        action = "DELETE";
+                        targetSheet = text.match(/DELETE\s+FROM\s+[`]?([^`\s]+)[`]?/i)?.[1];
+                    } else if (sqlText.startsWith("INSERT")) {
+                        action = "CREATE";
+                        targetSheet = text.match(/INSERT\s+INTO\s+[`]?([^`\s]+)[`]?/i)?.[1];
+                    }
+
+                    // 쿼리 실행
+                    const result = await alasql.promise(text);
+
+                    // 🚀 [새로 추가된 부분 1] UPDATE 쿼리인데 반영된 행이 0개라면 차단!
+                    if ((action === "UPDATE" || action === "DELETE") && typeof result === "number" && result === 0) {
+                        throw new Error("AlaSQL 내부에서 업데이트된 데이터가 0건입니다. WHERE 조건(예: [0] = 'Inventory/1')을 다시 확인하세요.");
+                    }
+
+                    // 🟢 확실하게 배열(Array) 형태의 결과가 나왔을 때만 SELECT 로직을 태웁니다.
+                    if (action === "SELECT" || Array.isArray(result)) {
+                        if (!Array.isArray(result)) {
+                            throw new Error("조회 결과가 올바른 표 형태가 아닙니다.");
+                        }
+                        if (result.length === 0) {
+                            this.setLoading(false);
+                            return alert("조회된 데이터가 없습니다.");
+                        }
+                        const formattedText = result.map(row => Object.values(row).join(", ")).join("\n");
+
+                        google.script.run
+                            .withSuccessHandler((res) => {
+                                this.setLoading(false);
+                                this.finishProcessing(res, "조회 데이터 입력 완료");
+                            })
+                            .withFailureHandler((err) => {
+                                this.setLoading(false);
+                                alert("서버 통신 에러: " + err.message);
+                            })
+                            .appendTextData(formattedText, "MEMO");
+                        return;
+                    }
+
+                    // 데이터 조작 처리 (UPDATE, DELETE, CREATE)
+                    if (!targetSheet) throw new Error("쿼리에서 지원하는 액션이나 테이블명을 찾을 수 없습니다.");
+
+                    const table = alasql.tables[targetSheet];
+                    if (!table || !table.data) throw new Error(`메모리에 ${targetSheet} 테이블이 없습니다.`);
+
+                    let targetId = null;
+                    let rowData = null;
+
+                    if (action === "UPDATE" || action === "DELETE") {
+                        const idMatch = text.match(/WHERE\s+(?:\[0\]|['"]?0['"]?)\s*=\s*['"]([^'"]+)['"]/i);
+                        targetId = idMatch ? idMatch[1] : null;
+
+                        if (!targetId) throw new Error("WHERE 절에서 조작할 대상을 찾을 수 없습니다. (예: WHERE [0] = 'ID')");
+
+                        if (action === "UPDATE") {
+                            // 🚀 [수정된 부분 2] 키 이름이 무엇이든 '값(Value)'만 뽑아서 모조리 검사하는 더 강력한 로직
+                            const targetRow = table.data.find(r => {
+                                const values = Object.values(r);
+                                return values.some(val => val && val.toString().trim() === targetId.toString().trim());
+                            });
+
+                            if (targetRow) {
+                                rowData = Object.values(targetRow);
+                                console.log("최종 추출 성공:", rowData);
+                            } else {
+                                console.error("ID 매칭 실패. 테이블 첫 행 데이터 구조:", table.data[0]);
+                                throw new Error(`테이블에서 ID(${targetId})를 찾을 수 없습니다.`);
+                            }
+                        }
+                    } else if (action === "CREATE") {
+                        if (table.data.length > 0) {
+                            const newRow = table.data[table.data.length - 1];
+                            rowData = Object.values(newRow);
+                            targetId = rowData[0];
+                        } else {
+                            throw new Error("INSERT 데이터를 확인할 수 없습니다.");
+                        }
+                    }
+
+                    const payload = {
+                        content: JSON.stringify({
+                            action: action,
+                            targetSheet: targetSheet,
+                            id: targetId,
+                            rowData: rowData
+                        }),
+                        mode: this.currentMode
+                    };
+
+                    this.sendToServer(payload);
+
+                } catch (e) {
+                    this.setLoading(false); // 에러 시 무조건 로딩 해제
+                    console.error("SQL 처리 오류:", e);
+                    alert("SQL 에러: " + e.message);
+                    return;
+                }
+            } else {
+                this.sendToServer({ content: text, mode: this.currentMode });
+            }
+        },
+
+        // 서버 전송 로직 분리 (유지보수용)
+        sendToServer: function(payload) {
+            google.script.run
+                .withSuccessHandler((response) => {
+                    this.setLoading(false);
+                    if(response && response.success) {
+                        this.els.input.value = '';
+                        this.els.applyBtn.disabled = true;
+                        this.els.input.placeholder = "전송 완료";
+                        setTimeout(() => {
+                            this.els.input.placeholder = this.getPlaceholderText(this.currentMode);
+                        }, 2000);
+                    } else {
+                        alert("에러: " + (response.error || "오류 발생"));
+                    }
+                })
+                .withFailureHandler((err) => {
+                    this.setLoading(false);
+                    alert("네트워크 실패: " + err.message);
+                })
+                .appendTextData(payload.content, payload.mode);
+        },
+        finishProcessing: function(response, msg) {
+            this.setLoading(false);
+            if(response && response.success) {
+                this.els.input.value = '';
+                this.els.applyBtn.disabled = true;
+                this.els.input.placeholder = msg;
+                setTimeout(() => {
+                    this.els.input.placeholder = this.getPlaceholderText(this.currentMode);
+                }, 2000);
+            } else {
+                alert("에러: " + (response.error || "오류 발생"));
+            }
+        },
+        setLoading: function(isLoading) {
+            this.els.applyBtn.classList.toggle('loading', isLoading);
+            this.els.applyBtn.disabled = isLoading;
+            this.els.input.disabled = isLoading;
+            if (!isLoading) this.els.input.focus();
+        }
+    }
+    window.onload = () => InputManager.init();
+</script>
+</body>
+</html>
