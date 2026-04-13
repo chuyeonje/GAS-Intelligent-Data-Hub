@@ -73,6 +73,7 @@ LLM 전달 컨텍스트 최소화
 드라이브 파일 관리
 일정 자동 입력
 외부 데이터 수집 후 반영
+
 🏗 시스템 구조
 Top-Down Control Model
 모든 시트는 Master Table 정의를 따름
@@ -82,6 +83,7 @@ Hybrid Query Layer
 복잡한 조회: AlaSQL (client side)
 대규모 필터링: Google Sheets native function
 실행 레이어 분리로 성능 최적화
+
 ⚙️ 설치 구조
 Google-Drive-Root/
  └── 시트폴더/
@@ -90,6 +92,7 @@ Google-Drive-Root/
       ├── AI/
       ├── ORC/
       └── [Master Control Sheet]
+
 🔧 Setup
 Drive 폴더 구조 업로드
 Master Sheet 복사
@@ -99,11 +102,12 @@ GEMINI_API_KEY
 SLACK_WEBHOOK_URL
 FOLDER_ID
 Master Table Sync 실행
+
 ⚠️ 주의사항
 구조 변경은 반드시 Master Table을 통해 수행
 시트 직접 수정은 시스템 불일치 발생 가능
 대규모 작업 전 반드시 백업 권장
-🧩 핵심 요약
 
+🧩 핵심 요약
 이 시스템은 “스프레드시트 기반 자동화 툴”이 아니라
 스프레드시트를 데이터베이스로 재해석한 실행형 AI OS 구조입니다.
